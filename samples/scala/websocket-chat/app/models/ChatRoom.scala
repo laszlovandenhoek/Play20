@@ -2,17 +2,16 @@ package models
 
 import akka.actor._
 import scala.concurrent.duration._
-
 import play.api._
 import play.api.libs.json._
 import play.api.libs.iteratee._
 import play.api.libs.concurrent._
-
 import akka.util.Timeout
 import akka.pattern.ask
-
 import play.api.Play.current
 import play.api.libs.concurrent.Execution.Implicits._
+import java.text.SimpleDateFormat
+import java.util.Date
 
 object Robot {
   
@@ -61,7 +60,18 @@ object ChatRoom {
       
         // Create an Iteratee to consume the feed
         val iteratee = Iteratee.foreach[JsValue] { event =>
-          default ! Talk(username, (event \ "text").as[String])
+          default !
+          {
+              val eventType = (event \ "kind").as[String]
+              if (eventType.equals("talk")) {
+                Talk(username, (event \ "text").as[String])
+              } else if (eventType.equals("move")) {
+                 Move(username, (event \ "x").as[Int], (event \ "y").as[Int])
+              } else {
+                None
+              }
+            }
+           
         }.mapDone { _ =>
           default ! Quit(username)
         }
@@ -103,6 +113,10 @@ class ChatRoom extends Actor {
       }
     }
 
+    case Move(username, x, y) => {
+    	notifyOthers(username, x, y)
+    }
+    
     case NotifyJoin(username) => {
       notifyAll("join", username, "has entered the room")
     }
@@ -123,6 +137,7 @@ class ChatRoom extends Actor {
       Seq(
         "kind" -> JsString(kind),
         "user" -> JsString(user),
+        "clock" -> JsString(new SimpleDateFormat("HH:mm:ss").format(new Date())),
         "message" -> JsString(text),
         "members" -> JsArray(
           members.toList.map(JsString)
@@ -132,11 +147,28 @@ class ChatRoom extends Actor {
     chatChannel.push(msg)
   }
   
+  def notifyOthers(originator: String, x: Int, y: Int) {
+	    val msg = JsObject(
+	      Seq(
+	        "kind" -> JsString("move"),
+	        "user" -> JsString(originator),
+	        "x" -> JsNumber(x),
+	        "y" -> JsNumber(y)
+	      )
+	    )
+	    
+	    chatChannel.push(msg)
+	        
+	    //TODO: exclude originator?
+	    
+	  }
+  
 }
 
 case class Join(username: String)
 case class Quit(username: String)
 case class Talk(username: String, text: String)
+case class Move(username: String, x: Int, y: Int)
 case class NotifyJoin(username: String)
 
 case class Connected(enumerator:Enumerator[JsValue])
